@@ -1,0 +1,70 @@
+---
+title: FestiPlan - Diagramme UML de séquence - Déplacer un concert (PATCH /concerts/{id}/reschedule)
+---
+sequenceDiagram
+    autonumber
+    actor C as Client
+    participant R as Router FastAPI<br/>(concerts.py)
+    participant UC as RescheduleConcert<br/>UseCase
+    participant TS as TimeSlot<br/>(objet-valeur)
+    participant Repo as FestivalRepository<br/>(port) / SqlAlchemy
+    participant F as Festival<br/>(agrégat)
+    participant NH as Notification<br/>Handler
+    participant N as Notifier (port)<br/>FakeEmailNotifier
+    participant DB as SQLite
+
+    C->>R: PATCH {start_time, end_time}
+    R->>R: validation du format (Pydantic)
+    R->>UC: execute(RescheduleConcert)
+    UC->>TS: TimeSlot(start, end)
+    alt fin <= début (R1)
+        TS-->>UC: RuleViolation
+        UC-->>R: RuleViolation
+        R-->>C: 400 Bad Request
+    end
+
+    UC->>Repo: get_by_concert_id(id)
+    Repo->>DB: SELECT festival + concerts
+    alt concert inconnu
+        Repo-->>UC: None
+        UC-->>R: NotFound
+        R-->>C: 404 Not Found
+    end
+    Repo-->>UC: Festival (avec ses concerts)
+
+    UC->>F: reschedule_concert(id, slot)
+    F->>F: _ensure_in_preparation() (R7)
+    alt planning publié
+        F-->>UC: InvalidStateTransition
+        UC-->>R: InvalidStateTransition
+        R-->>C: 409 "planning publié"<br/>→ utiliser POST /published-reschedule
+    end
+    F->>F: _check_availability()<br/>R6 période · R2 scène · R3 artiste
+    alt conflit ou hors festival
+        F-->>UC: SchedulingConflict / RuleViolation
+        UC-->>R: erreur métier
+        R-->>C: 409 / 400 (rien n'est enregistré)
+    end
+    F->>F: concert.move_to(slot)<br/>+ enregistre ConcertRescheduled
+    F-->>UC: concert
+
+    UC->>Repo: save(festival)
+    Repo->>DB: UPDATE + COMMIT
+    rect rgb(220, 240, 220)
+        Note over UC,DB: ✅ La modification est VALIDÉE ici.<br/>Rien de ce qui suit ne peut l'annuler.
+    end
+
+    UC->>F: pull_events()
+    F-->>UC: [ConcertRescheduled]
+    UC->>NH: handle(events)
+    NH->>N: send(sujet, message)
+    alt service de notification disponible
+        N-->>NH: ok
+        NH-->>UC: warnings = []
+    else panne (FESTIPLAN_FAIL_NOTIFICATIONS=true)
+        N-->>NH: exception
+        NH->>NH: log.warning(...)
+        NH-->>UC: warnings = ["modification enregistrée,<br/>notification non envoyée"]
+    end
+    UC-->>R: OperationResult(concert, warnings)
+    R-->>C: 200 OK {concert..., "warnings": [...]}

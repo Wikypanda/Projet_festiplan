@@ -1,0 +1,103 @@
+---
+title: FestiPlan - Modèle du domaine (diagramme de classes)
+---
+classDiagram
+    direction LR
+
+    namespace Agregat_Festival {
+        class Festival {
+            <<racine d'agrégat>>
+            +id: int
+            +name: str
+            +location: str
+            +period: FestivalPeriod
+            +status: PlanningStatus
+            +concerts: list~Concert~
+            +schedule_concert(artist, stage, slot) Concert
+            +reschedule_concert(concert_id, slot) Concert
+            +reschedule_published_concert(concert_id, slot, reason) Concert
+            +cancel_concert(concert_id) Concert
+            +publish(artists, stages)
+            +schedule() list~Concert~
+            +pull_events() list~DomainEvent~
+            -_ensure_in_preparation() R7
+            -_check_resources() R4 R5
+            -_check_availability() R6 R2 R3
+        }
+        class Concert {
+            <<entité>>
+            +id: int
+            +artist_id: int
+            +stage_id: int
+            +slot: TimeSlot
+            +status: ConcertStatus
+            +move_to(slot)
+            +cancel()
+        }
+        class PlanningStatus {
+            <<enumeration>>
+            PREPARATION
+            PUBLISHED
+        }
+        class ConcertStatus {
+            <<enumeration>>
+            SCHEDULED
+            CANCELLED
+        }
+    }
+
+    namespace Objets_valeurs {
+        class TimeSlot {
+            <<objet-valeur>>
+            +start: datetime
+            +end: datetime
+            +overlaps(other) bool
+        }
+        class FestivalPeriod {
+            <<objet-valeur>>
+            +start: datetime
+            +end: datetime
+            +contains(slot) bool
+        }
+        class EquipmentSet {
+            <<objet-valeur>>
+            +items: frozenset
+            +missing_from(available) set
+        }
+    }
+
+    class Artist {
+        <<racine d'agrégat>>
+        +id: int
+        +name: str
+        +genre: str
+        +required_equipment: EquipmentSet
+    }
+    class Stage {
+        <<racine d'agrégat>>
+        +id: int
+        +festival_id: int
+        +name: str
+        +capacity: int — R9 strictement positive
+        +available_equipment: EquipmentSet
+    }
+    class Incident {
+        <<racine d'agrégat>>
+        +id: int
+        +concert_id: int
+        +description: str — R10 non vide
+        +occurred_at: datetime
+        +resolved: bool
+    }
+
+    Festival "1" *-- "0..*" Concert : contient
+    Festival --> PlanningStatus
+    Festival --> FestivalPeriod
+    Concert --> ConcertStatus
+    Concert --> TimeSlot : R1 fin > début
+    Artist --> EquipmentSet
+    Stage --> EquipmentSet
+    Concert ..> Artist : artist_id (référence par id)
+    Concert ..> Stage : stage_id (référence par id)
+    Stage ..> Festival : festival_id (référence par id)
+    Incident ..> Concert : concert_id (référence par id)

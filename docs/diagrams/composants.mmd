@@ -1,0 +1,88 @@
+---
+title: FestiPlan - Diagramme UML de composants (architecture réelle)
+---
+flowchart TB
+    client(["👤 Client HTTP<br/>Swagger, front..."])
+    seedscript(["👤 Script<br/>python -m app.seed"])
+
+    subgraph HTTP["«adaptateur entrant» app/adapters/http"]
+        direction LR
+        main["«component»<br/><b>main.py</b><br/>create_app()"]
+        routers["«component»<br/><b>Routers FastAPI</b><br/>festivals · concerts · catalog"]
+        schemas["«component»<br/><b>schemas.py</b><br/>validation Pydantic"]
+        errors["«component»<br/><b>errors.py</b><br/>DomainError → 400/404/409"]
+        deps["«component»<br/><b>dependencies.py</b><br/>session par requête"]
+    end
+
+    boot["«component» <b>UseCases</b> — app/bootstrap.py<br/>module de composition : crée les adaptateurs et les injecte"]
+
+    subgraph CORE["CŒUR APPLICATIF — aucune dépendance à FastAPI ni SQLAlchemy"]
+        direction TB
+        subgraph APP["«application» app/application"]
+            direction LR
+            cmd["«component»<br/><b>commands.py</b>"]
+            uc["«component»<br/><b>Cas d'utilisation</b><br/>ScheduleConcert · RescheduleConcert<br/>ReschedulePublishedConcert · CancelConcert<br/>PublishPlanning · ReportIncident ..."]
+            nh["«component»<br/><b>NotificationHandler</b><br/>réagit aux événements"]
+        end
+        subgraph PORTS["«ports sortants» app/application/ports.py"]
+            direction LR
+            pFest(["«interface»<br/>FestivalRepository"])
+            pArt(["«interface»<br/>ArtistRepository"])
+            pStage(["«interface»<br/>StageRepository"])
+            pInc(["«interface»<br/>IncidentRepository"])
+            pNotif(["«interface»<br/>Notifier"])
+        end
+        subgraph DOM["«domaine» app/domain"]
+            direction LR
+            fest["«component»<br/><b>Agrégat Festival</b><br/>Festival + Concert<br/>R2 R3 R4 R5 R6 R7 R8"]
+            others["«component»<br/><b>Artist · Stage · Incident</b><br/>R9 R10"]
+            vo["«component»<br/><b>Objets-valeurs</b><br/>TimeSlot (R1) · FestivalPeriod<br/>EquipmentSet"]
+            ev["«component»<br/><b>Événements</b><br/>ConcertRescheduled<br/>ConcertCancelled · PlanningPublished"]
+        end
+    end
+
+    subgraph OUT["«adaptateurs sortants»"]
+        direction LR
+        sqlrepo["«component»<br/><b>SqlAlchemyFestivalRepository<br/>SqlAlchemyArtistRepository<br/>SqlAlchemyStageRepository<br/>SqlAlchemyIncidentRepository</b><br/>app/adapters/persistence"]
+        fake["«component»<br/><b>FakeEmailNotifier</b><br/>app/adapters/notifications"]
+    end
+    db[("SQLite<br/>festiplan.db")]
+
+    %% Entrée HTTP
+    client -->|HTTP| main
+    main --> routers
+    main --> errors
+    routers --> schemas
+    routers --> deps
+    deps --> boot
+    seedscript --> boot
+    routers -->|"execute(commande)"| uc
+    routers --> cmd
+
+    %% Composition
+    boot -.->|instancie| uc
+    boot -.->|instancie| sqlrepo
+    boot -.->|instancie| fake
+
+    %% Cœur
+    uc --> fest
+    uc --> others
+    fest --> vo
+    fest --> ev
+    uc -->|"événements après save()"| nh
+    uc -->|utilise| PORTS
+    nh -->|utilise| pNotif
+
+    %% Implémentation des ports
+    sqlrepo -.->|implémente| pFest & pArt & pStage & pInc
+    fake -.->|implémente| pNotif
+    sqlrepo --> db
+
+    classDef core fill:#e8f4ea,stroke:#2e7d32,color:#000
+    classDef port fill:#fff8e1,stroke:#f9a825,color:#000
+    classDef adapter fill:#e3f2fd,stroke:#1565c0,color:#000
+    classDef compo fill:#f3e5f5,stroke:#6a1b9a,color:#000
+    class uc,cmd,nh,fest,others,vo,ev core
+    class pFest,pArt,pStage,pInc,pNotif port
+    class main,routers,schemas,errors,deps,sqlrepo,fake adapter
+    class boot compo
